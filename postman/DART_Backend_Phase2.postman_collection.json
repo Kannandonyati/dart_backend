@@ -1,0 +1,490 @@
+{
+  "info": {
+    "name": "DART Backend — Phase 2 (Recon Core)",
+    "description": "Covers every endpoint built in Phase 2: create/list/get/update/delete for Recon. See Backend/docs/KT_PHASE2.md for the full write-up.\n\nUses the same `DART_Backend_Local.postman_environment.json` as Phase 1 — it's self-contained (logs in as the bootstrap admin itself to provision two fresh users, `recon-a@dart.com` / `recon-b@dart.com`), so it does not depend on Phase 1's collection having been run first or on any of its collection variables.\n\nRun order for a clean walkthrough: Setup (bootstrap login + provision A/B + login as each) > Create recon (as A) > Duplicate name (expect 409) > List my recons (as A) > Get by id (as A) > Get someone else's recon (as B, expect 404) > List available (as B, expect empty) > Rename (as A) > Rename someone else's (as B, expect 404) > Delete someone else's (as B, expect 404) > Delete (as A) > Get after delete (expect 404) > Delete again (expect 404).\n\nSet `base_url`, `bootstrap_admin_email`, `bootstrap_admin_password` in the accompanying environment file before running.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" },
+    { "key": "access_token", "value": "" },
+    { "key": "token_a", "value": "" },
+    { "key": "token_b", "value": "" },
+    { "key": "recon_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Setup",
+      "item": [
+        {
+          "name": "Login as bootstrap admin",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{bootstrap_admin_email}}\",\n  \"password\": \"{{bootstrap_admin_password}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('access_token', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create user A (as bootstrap admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": "{{base_url}}/api/v1/users",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"recon-a@dart.com\",\n  \"username\": \"recon_a\",\n  \"password\": \"ReconUserA123!\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created or 409 already exists', () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create user B (as bootstrap admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": "{{base_url}}/api/v1/users",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"recon-b@dart.com\",\n  \"username\": \"recon_b\",\n  \"password\": \"ReconUserB123!\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created or 409 already exists', () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as User A",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"recon-a@dart.com\",\n  \"password\": \"ReconUserA123!\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('token_a', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as User B",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"recon-b@dart.com\",\n  \"password\": \"ReconUserB123!\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('token_b', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Recons — Create",
+      "item": [
+        {
+          "name": "Create recon (as A)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_a}}" }
+            ],
+            "url": "{{base_url}}/api/v1/recons",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Q1_GL_Recon\",\n  \"description\": \"Quarterly GL reconciliation\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('owner is username, not id', () => pm.expect(body.owner).to.eql('recon_a'));",
+                  "pm.test('group_name is null until Phase 3', () => pm.expect(body.group_name).to.be.null);",
+                  "pm.collectionVariables.set('recon_id', body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create recon — no auth (expect 401)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/recons",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"No Auth Recon\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create recon — duplicate name (expect 409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_a}}" }
+            ],
+            "url": "{{base_url}}/api/v1/recons",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Q1_GL_Recon\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create recon — blank name (expect 422, not 500)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_a}}" }
+            ],
+            "url": "{{base_url}}/api/v1/recons",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('422 not 500', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Recons — Read",
+      "item": [
+        {
+          "name": "List my recons (as A)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_a}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/recons?page=1&page_size=25",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "recons"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "page_size", "value": "25" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('is a list', () => pm.expect(body).to.be.an('array'));",
+                  "pm.test('only own recons, not B\\'s', () => pm.expect(body.every(r => r.owner === 'recon_a')).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get recon by id (as owner A)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_a}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('name matches', () => pm.expect(pm.response.json().name).to.eql('Q1_GL_Recon'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get someone else's recon (as B — expect 404, not 403)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_b}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('404 Not Found — enumeration resistance, never 403', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get a genuinely nonexistent recon (as B — expect identical 404)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_b}}" }],
+            "url": "{{base_url}}/api/v1/recons/00000000-0000-0000-0000-000000000000"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));",
+                  "pm.test('same error code as owned-by-someone-else case', () => pm.expect(pm.response.json().error.code).to.eql('not_found'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List available recons (as B — expect empty until Phase 3)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_b}}" }],
+            "url": "{{base_url}}/api/v1/recons/available"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK, empty — not an error', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json()).to.eql([]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Recons — Update",
+      "item": [
+        {
+          "name": "Rename recon (as owner A)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_a}}" }
+            ],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Q1_GL_Recon_Renamed\",\n  \"description\": \"Updated description\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('name updated', () => pm.expect(pm.response.json().name).to.eql('Q1_GL_Recon_Renamed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rename someone else's recon (as B — expect 404)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_b}}" }
+            ],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Hijacked\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Recons — Delete",
+      "item": [
+        {
+          "name": "Delete someone else's recon (as B — expect 404, still there for A)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_b}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete recon (as owner A)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_a}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get after delete (expect 404 — soft delete hides it)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_a}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete an already-deleted recon (as owner A — expect 404, not 204 again)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_a}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('404 Not Found — soft-deleted recons are gone for good via this route', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

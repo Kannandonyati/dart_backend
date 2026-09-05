@@ -1,0 +1,80 @@
+[project]
+name = "dart-backend"
+version = "0.1.0"
+description = "DART API-driven backend — FastAPI, async SQLAlchemy, Redis, Celery, WebSockets"
+requires-python = ">=3.12,<3.13"
+readme = "README.md"
+dependencies = [
+    "fastapi>=0.116,<0.117",
+    "uvicorn[standard]>=0.35,<0.36",
+    "gunicorn>=23.0,<24.0",
+    "pydantic[email]>=2.9,<3.0",
+    "pydantic-settings>=2.6,<3.0",
+    "sqlalchemy[asyncio]>=2.0,<2.1",
+    "asyncpg>=0.30,<0.31",
+    "alembic>=1.14,<2.0",
+    "redis[hiredis]>=5.2,<6.0",
+    "celery[redis]>=5.4,<6.0",
+    "flower>=2.0,<3.0",
+    "python-jose[cryptography]>=3.3,<4.0",
+    "passlib[argon2]>=1.7,<2.0",
+    "python-multipart>=0.0.17,<0.1.0",
+    "slowapi>=0.1.9,<0.2.0",
+    "structlog>=24.4,<25.0",
+    "colorama>=0.4,<0.5",
+    "orjson>=3.10,<4.0",
+    "tenacity>=9.0,<10.0",
+    "httpx>=0.27,<0.28",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pre-commit>=4.0",
+    "faker>=33.1",
+]
+prod = [
+    "sentry-sdk[fastapi]>=2.19",
+]
+
+[tool.uv]
+package = false # this is an application, not a library — no build backend needed
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# assert + obviously-fake hardcoded test credentials are expected in tests
+"tests/*" = ["S101", "S105", "S106", "S107"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+# No maintained type stubs upstream for these — ignoring missing imports
+# here (not disabling strict mode) is the standard trade-off rather than
+# hand-maintaining a third stub package per dependency.
+[[tool.mypy.overrides]]
+module = ["jose.*", "passlib.*", "celery.*", "colorama.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# app.db.session.engine is a module-level singleton (matches how the
+# real app runs) — pytest-asyncio's default is a NEW event loop per test
+# function, and reusing a connection pool created on one event loop from
+# a different one breaks asyncpg's Windows proactor sockets with opaque
+# AttributeErrors on teardown. Session-scoped loop matches the engine's
+# actual lifetime instead of fighting it.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]

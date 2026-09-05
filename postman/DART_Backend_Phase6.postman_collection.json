@@ -1,0 +1,528 @@
+{
+  "info": {
+    "name": "DART Backend — Phase 6 (Bridge Members)",
+    "description": "Covers every endpoint built in Phase 6: bridge mapping CRUD, default identity seeding, CSV import, bridge-run start/status, and reading back resolved/kickout-flagged data. See Backend/docs/KT_PHASE6.md for the full write-up.\n\n**Requires a running Celery worker** consuming the same Redis broker as `base_url`'s backend, same as Phase 5. Start one with:\n`uv run celery -A app.tasks.celery_app worker --pool=solo --loglevel=info`\n\nSelf-contained like Phase 2-5's collections. Set `base_url`, `bootstrap_admin_email`, `bootstrap_admin_password` in the accompanying environment file before running.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" },
+    { "key": "access_token", "value": "" },
+    { "key": "token_a", "value": "" },
+    { "key": "token_b", "value": "" },
+    { "key": "recon_id", "value": "" },
+    { "key": "import_run_id", "value": "" },
+    { "key": "import_poll_attempt", "value": "" },
+    { "key": "bridge_run_id", "value": "" },
+    { "key": "poll_attempt", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Setup",
+      "item": [
+        {
+          "name": "Login as bootstrap admin",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{bootstrap_admin_email}}\",\n  \"password\": \"{{bootstrap_admin_password}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('access_token', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create user A",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": "{{base_url}}/api/v1/users",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bridge-a@dart.com\",\n  \"username\": \"bridge_a\",\n  \"password\": \"BridgeUserA123!\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created or 409 already exists', () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as User A",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bridge-a@dart.com\",\n  \"password\": \"BridgeUserA123!\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('token_a', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create recon",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_a}}" }
+            ],
+            "url": "{{base_url}}/api/v1/recons",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Phase6_Test_Recon\"\n}" }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('recon_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create App1 and App2",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_a}}" }
+            ],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/apps",
+            "body": { "mode": "raw", "raw": "{\n  \"app_number\": 1,\n  \"name\": \"GL\"\n}" }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('201 Created', () => pm.response.to.have.status(201));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create App2",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_a}}" }
+            ],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/apps",
+            "body": { "mode": "raw", "raw": "{\n  \"app_number\": 2,\n  \"name\": \"Sub\"\n}" }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('201 Created', () => pm.response.to.have.status(201));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create dimension YEAR (both apps, col 1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_a}}" }
+            ],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/dimensions",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"YEAR\",\n  \"mappings\": [\n    {\"app_number\": 1, \"in_file\": true, \"column_location\": \"1\"},\n    {\"app_number\": 2, \"in_file\": true, \"column_location\": \"1\"}\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('201 Created', () => pm.response.to.have.status(201));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create dimension ACCOUNT (both apps, col 2)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_a}}" }
+            ],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/dimensions",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"ACCOUNT\",\n  \"mappings\": [\n    {\"app_number\": 1, \"in_file\": true, \"column_location\": \"2\"},\n    {\"app_number\": 2, \"in_file\": true, \"column_location\": \"2\"}\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('201 Created', () => pm.response.to.have.status(201));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create dimension AMOUNT (both apps, col 3)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_a}}" }
+            ],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/dimensions",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"AMOUNT\",\n  \"mappings\": [\n    {\"app_number\": 1, \"in_file\": true, \"column_location\": \"3\"},\n    {\"app_number\": 2, \"in_file\": true, \"column_location\": \"3\"}\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('201 Created', () => pm.response.to.have.status(201));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Import App1 data (account 1000)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_a}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/imports",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "app_number", "value": "1", "type": "text" },
+                { "key": "file", "type": "file", "src": "fixtures/bridge_import.csv" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('import_run_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Poll import run until completed",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_a}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/imports/{{import_run_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const attempt = pm.collectionVariables.get('import_poll_attempt') ? parseInt(pm.collectionVariables.get('import_poll_attempt')) : 0;",
+                  "if (body.status === 'pending' || body.status === 'processing') {",
+                  "  if (attempt < 20) {",
+                  "    pm.collectionVariables.set('import_poll_attempt', attempt + 1);",
+                  "    setTimeout(() => {}, 3000);",
+                  "    postman.setNextRequest('Poll import run until completed');",
+                  "    return;",
+                  "  }",
+                  "  throw new Error('Import run still ' + body.status + ' after 20 polls — is a Celery worker running?');",
+                  "}",
+                  "pm.collectionVariables.unset('import_poll_attempt');",
+                  "pm.test('completed', () => pm.expect(body.status).to.eql('completed'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Bridge Mappings",
+      "item": [
+        {
+          "name": "Create mapping (YEAR 2024 -> 2024)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_a}}" }
+            ],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/bridge-mappings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"app_number\": 1,\n  \"dimension_name\": \"YEAR\",\n  \"source_member\": \"2024\",\n  \"bridge_member\": \"2024\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('is_kickout is false', () => pm.expect(pm.response.json().is_kickout).to.be.false);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create mapping for AMOUNT (expect 400, not bridgeable)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_a}}" }
+            ],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/bridge-mappings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"app_number\": 1,\n  \"dimension_name\": \"AMOUNT\",\n  \"source_member\": \"100\",\n  \"bridge_member\": \"X\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('code is not_bridgeable', () => pm.expect(pm.response.json().error.code).to.eql('not_bridgeable'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Default (identity) mappings for App1's ACCOUNT/YEAR",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_a}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/bridge-mappings/default?app_number=1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const dims = pm.response.json().map(m => m.dimension_name);",
+                  "pm.test('ACCOUNT identity-mapped, AMOUNT never touched', () => {",
+                  "  pm.expect(dims).to.include('ACCOUNT');",
+                  "  pm.expect(dims).to.not.include('AMOUNT');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List bridge mappings",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_a}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/bridge-mappings"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('200 OK', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Bridge Run",
+      "item": [
+        {
+          "name": "Start bridge run",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_a}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/bridge-runs"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('starts pending', () => pm.expect(pm.response.json().status).to.eql('pending'));",
+                  "pm.collectionVariables.set('bridge_run_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Poll bridge run until completed",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_a}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/bridge-runs/{{bridge_run_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const attempt = pm.collectionVariables.get('poll_attempt') ? parseInt(pm.collectionVariables.get('poll_attempt')) : 0;",
+                  "if (body.status === 'pending' || body.status === 'processing') {",
+                  "  if (attempt < 20) {",
+                  "    pm.collectionVariables.set('poll_attempt', attempt + 1);",
+                  "    setTimeout(() => {}, 3000);",
+                  "    postman.setNextRequest('Poll bridge run until completed');",
+                  "    return;",
+                  "  }",
+                  "  throw new Error('Bridge run still ' + body.status + ' after 20 polls — is a Celery worker running?');",
+                  "}",
+                  "pm.collectionVariables.unset('poll_attempt');",
+                  "pm.test('completed', () => pm.expect(body.status).to.eql('completed'));",
+                  "pm.test('total_rows is 1', () => pm.expect(body.total_rows).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read bridge data (resolved values)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_a}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/bridge-data?app_number=1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK, one row', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().length).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Access control",
+      "item": [
+        {
+          "name": "Create user B",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": "{{base_url}}/api/v1/users",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bridge-b@dart.com\",\n  \"username\": \"bridge_b\",\n  \"password\": \"BridgeUserB123!\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created or 409 already exists', () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as User B",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bridge-b@dart.com\",\n  \"password\": \"BridgeUserB123!\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('token_b', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "User B cannot see User A's bridge mappings (expect 404, not 403)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_b}}" }],
+            "url": "{{base_url}}/api/v1/recons/{{recon_id}}/bridge-mappings"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": ["pm.test('404 Not Found', () => pm.response.to.have.status(404));"]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
