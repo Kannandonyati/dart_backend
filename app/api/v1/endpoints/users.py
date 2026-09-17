@@ -18,7 +18,7 @@ from app.api.deps import CurrentUser, DbSession, get_pagination
 from app.core.audit import record_audit_log
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.permissions import require_privilege
-from app.core.security import hash_password
+from app.core.security import hash_password_async
 from app.core.user_type_grants import sync_user_type_grants
 from app.models.user import User
 from app.schemas.pagination import PaginatedResponse, build_pagination_meta
@@ -67,7 +67,7 @@ async def create_user(body: UserCreate, db: DbSession) -> User:
     user = User(
         email=body.email,
         username=body.username,
-        hashed_password=hash_password(body.password),
+        hashed_password=await hash_password_async(body.password),
         # Created directly, not via an invite that needs redeeming — see
         # User.invite_accepted_at's docstring.
         invite_accepted_at=datetime.now(UTC),

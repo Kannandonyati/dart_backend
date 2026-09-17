@@ -9,6 +9,7 @@ signing/verifying, not revocation state, which belongs with whatever calls
 it once a real user store exists.
 """
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -39,6 +40,16 @@ def hash_password(plain_password: str) -> str:
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bool(_pwd_context.verify(plain_password, hashed_password))
+
+
+async def hash_password_async(plain_password: str) -> str:
+    """Argon2 is CPU-bound — keep it off the event loop."""
+    return await asyncio.to_thread(hash_password, plain_password)
+
+
+async def verify_password_async(plain_password: str, hashed_password: str) -> bool:
+    """Argon2 is CPU-bound — keep it off the event loop."""
+    return await asyncio.to_thread(verify_password, plain_password, hashed_password)
 
 
 def _create_token(subject: str, token_type: TokenType, expires_delta: timedelta) -> str:

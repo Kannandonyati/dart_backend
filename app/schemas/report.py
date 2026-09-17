@@ -15,6 +15,8 @@ class ReportRowRead(BaseModel):
     app2_amount: Decimal
     variance: Decimal
     is_variance: bool
+    baseline_amount: Decimal | None = None
+    comparison_amount: Decimal | None = None
 
 
 class ReportSummaryRead(BaseModel):

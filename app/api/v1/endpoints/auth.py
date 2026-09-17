@@ -32,7 +32,6 @@ from app.api.deps import DbSession, load_active_user
 from app.core.audit import record_audit_log
 from app.core.audit_mode import current_audit_status
 from app.core.exceptions import UnauthorizedError
-from app.core.system_log import record_system_log
 from app.core.rate_limit import limiter
 from app.core.security import (
     InvalidTokenError,
@@ -41,8 +40,9 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     hash_password,
-    verify_password,
+    verify_password_async,
 )
+from app.core.system_log import record_system_log
 from app.models.user import User
 from app.schemas.auth import LoginRequest
 from app.schemas.common import RefreshRequest, Token
@@ -60,7 +60,7 @@ async def _authenticate(db: DbSession, email: str, password: str) -> User:
     user = (await db.execute(stmt)).scalar_one_or_none()
 
     hash_to_check = user.hashed_password if user is not None else _DUMMY_HASH
-    password_ok = verify_password(password, hash_to_check)
+    password_ok = await verify_password_async(password, hash_to_check)
 
     if user is None or not password_ok or not user.is_active:
         raise UnauthorizedError("Invalid email or password", code="invalid_credentials")

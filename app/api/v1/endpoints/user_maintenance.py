@@ -46,7 +46,7 @@ from app.core.security import (
     create_invite_token,
     create_password_reset_token,
     decode_token,
-    hash_password,
+    hash_password_async,
 )
 from app.core.usernames import derive_unique_username
 from app.models.user import User
@@ -119,7 +119,7 @@ async def invite_user(
         # a hash it recognizes, so login must still be able to run a
         # normal, valid comparison; it just always fails until the
         # invite is redeemed and a real password is set.
-        hashed_password=hash_password(uuid.uuid4().hex),
+        hashed_password=await hash_password_async(uuid.uuid4().hex),
         is_active=False,
         # Left NULL on purpose — see User.invite_accepted_at's docstring.
         # accept_invite() below is the only thing that ever sets it.
@@ -199,7 +199,7 @@ async def accept_invite(body: InviteAccept, db: DbSession) -> User:
     if user is None:
         raise UnauthorizedError("Invalid or expired invite token")
 
-    user.hashed_password = hash_password(body.password)
+    user.hashed_password = await hash_password_async(body.password)
     user.is_active = True
     user.invite_accepted_at = datetime.now(UTC)
     await record_audit_log(
@@ -249,7 +249,7 @@ async def reset_password(body: PasswordResetSubmit, db: DbSession) -> User:
     if user is None:
         raise UnauthorizedError("Invalid or expired reset token")
 
-    user.hashed_password = hash_password(body.new_password)
+    user.hashed_password = await hash_password_async(body.new_password)
     await record_audit_log(
         db,
         actor_user_id=user.id,

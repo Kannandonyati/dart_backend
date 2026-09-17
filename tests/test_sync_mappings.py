@@ -28,9 +28,9 @@ async def _owner_recon(
 ) -> tuple[str, str]:
     await make_user(email="a@dart.com", username="a", password="Password123!")
     token = await _login(client, "a@dart.com", "Password123!")
-    recon_id = (
-        await client.post(RECONS_URL, headers=_auth(token), json={"name": "R1"})
-    ).json()["id"]
+    recon_id = (await client.post(RECONS_URL, headers=_auth(token), json={"name": "R1"})).json()[
+        "id"
+    ]
     return token, recon_id
 
 
@@ -212,6 +212,9 @@ async def test_run_transformation_resolves_synced_values(
     unmapped_row = next(r for r in rows if r["data"]["ACCOUNT"] == "2000")
     assert mapped_row["synced"] == {"ACCOUNT": "CASH"}
     assert unmapped_row["synced"] == {}
+    assert response.headers["x-total-count"] == "2"
+    assert mapped_row["app_type"] == "App1"
+    assert mapped_row["amount"] == "100.00"
 
 
 async def test_run_transformation_resolves_concat_mapping(
@@ -245,3 +248,49 @@ async def test_non_owner_cannot_manage_sync_mappings(
 
     response = await client.get(f"{RECONS_URL}/{recon_id}/sync-mappings", headers=_auth(token_b))
     assert response.status_code == 404
+
+
+async def test_apply_all_creates_identity_mappings(
+    client: AsyncClient, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    token, recon_id = await _recon_with_two_apps_dimensions_and_data(client, make_user)
+    response = await client.post(
+        f"{RECONS_URL}/{recon_id}/sync-mappings/apply-all",
+        headers=_auth(token),
+        json={
+            "app_number": 1,
+            "dimension_names": ["ACCOUNT", "COST_CENTER"],
+            "concat_delimiter": "|",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["created"] == 2
+    listed = await client.get(
+        f"{RECONS_URL}/{recon_id}/sync-mappings?app_number=1", headers=_auth(token)
+    )
+    sources = {row["source_sync"] for row in listed.json()}
+    assert sources == {"1000|CC1", "2000|CC2"}
+    assert all(row["target_sync"] == row["source_sync"] for row in listed.json())
+
+
+async def test_run_transformation_applies_flip_sign(
+    client: AsyncClient, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    token, recon_id = await _recon_with_two_apps_dimensions_and_data(client, make_user)
+    await client.post(
+        f"{RECONS_URL}/{recon_id}/sync-mappings",
+        headers=_auth(token),
+        json={
+            "app_number": 1,
+            "dimension_names": ["ACCOUNT"],
+            "source_sync": "1000",
+            "target_sync": "CASH",
+            "flip_sign": True,
+        },
+    )
+    rows = (
+        await client.post(f"{RECONS_URL}/{recon_id}/sync-data/run", headers=_auth(token))
+    ).json()
+    mapped_row = next(r for r in rows if r["data"]["ACCOUNT"] == "1000")
+    assert mapped_row["flip_sign"] is True
+    assert mapped_row["sign_reversed_amount"] == "-100.00"

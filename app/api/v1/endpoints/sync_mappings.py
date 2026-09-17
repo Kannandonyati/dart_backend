@@ -1,8 +1,7 @@
-"""Sync Mapping CRUD and "possible combinations" candidate generation.
+"""Sync Mapping CRUD, possible combinations, and Apply All Members.
 
-Route order: `/possible-combinations` is registered before
-`/{mapping_id}` — same literal-before-parameterized rule every prior
-phase has needed.
+Route order: `/possible-combinations` and `/apply-all` are registered
+before `/{mapping_id}` so those literals are not captured as UUIDs.
 """
 
 import uuid
@@ -14,18 +13,23 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DbSession
 from app.core.audit import record_audit_log
-from app.core.exceptions import AppError, ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.core.recon_access import get_accessible_recon
-from app.models.import_run import ImportedRow
 from app.models.sync import SyncMapping
-from app.schemas.sync import SyncMappingCreate, SyncMappingRead, SyncMappingUpdate
+from app.schemas.sync import (
+    SyncApplyAllRead,
+    SyncApplyAllRequest,
+    SyncMappingCreate,
+    SyncMappingRead,
+    SyncMappingUpdate,
+)
+from app.services.sync_run import (
+    apply_all_identity_mappings,
+    assert_syncable_dimensions,
+    distinct_source_lists,
+)
 
 router = APIRouter(prefix="/recons/{recon_id}/sync-mappings", tags=["transformation"])
-
-_SYNC_DIMENSION_EXCLUDE = {"AMOUNT"}
-"""Excluded from sync mapping for the same reason it's excluded from
-Bridge mapping (Phase 6): AMOUNT is the measure being reconciled, not a
-matching/lookup key."""
 
 
 def _to_read(mapping: SyncMapping) -> SyncMappingRead:
@@ -56,22 +60,7 @@ async def create_sync_mapping(
     recon_id: uuid.UUID, body: SyncMappingCreate, current_user: CurrentUser, db: DbSession
 ) -> SyncMappingRead:
     await get_accessible_recon(db, current_user, recon_id)
-    if any(d.strip().upper() in _SYNC_DIMENSION_EXCLUDE for d in body.dimension_names):
-        raise AppError("AMOUNT is a measure, not a sync-mapped dimension.", code="not_syncable")
-
-    existing = await db.execute(
-        select(SyncMapping.id).where(
-            SyncMapping.recon_id == recon_id,
-            SyncMapping.app_number == body.app_number,
-            SyncMapping.dimension_names == body.dimension_names,
-            SyncMapping.source_sync == body.source_sync,
-        )
-    )
-    if existing.scalar_one_or_none() is not None:
-        raise ConflictError(
-            "A mapping for this app/dimension-combination/source value already exists."
-        )
-
+    assert_syncable_dimensions(body.dimension_names)
     mapping = SyncMapping(recon_id=recon_id, **body.model_dump())
     db.add(mapping)
     try:
@@ -91,7 +80,6 @@ async def create_sync_mapping(
         raise ConflictError(
             "A mapping for this app/dimension-combination/source value already exists."
         ) from exc
-
     await db.refresh(mapping)
     return _to_read(mapping)
 
@@ -108,8 +96,7 @@ async def list_sync_mappings(
     if app_number is not None:
         stmt = stmt.where(SyncMapping.app_number == app_number)
     stmt = stmt.order_by(SyncMapping.dimension_names, SyncMapping.source_sync)
-    result = await db.execute(stmt)
-    return [_to_read(m) for m in result.scalars().all()]
+    return [_to_read(m) for m in (await db.execute(stmt)).scalars().all()]
 
 
 @router.get("/possible-combinations", response_model=list[list[str]])
@@ -120,34 +107,38 @@ async def possible_combinations(
     current_user: CurrentUser,
     db: DbSession,
 ) -> list[list[str]]:
-    """Candidate composite-key values for setting up a concat sync
-    mapping. Confirmed against the old backend's `generate_comb.py`:
-    row-positional `zip(*lists)` of each dimension's distinct values, not
-    every cross-combination (`itertools.product`) — a genuinely
-    surprising design choice that only makes sense when the dimensions
-    are already row-aligned in the source file, but it's what's there,
-    so it's what's replicated. Each dimension's distinct-value list is
-    sorted here for determinism; the old backend's own ordering (live
-    scan order from its stored procedure) isn't reproducible or
-    meaningful outside that context."""
+    """Old `generate_comb.py`: positional zip of distinct values, not product."""
     await get_accessible_recon(db, current_user, recon_id)
-
-    value_lists: list[list[str]] = []
-    for dim_name in dimension_names:
-        values = (
-            (
-                await db.execute(
-                    select(ImportedRow.data[dim_name].astext)
-                    .where(ImportedRow.recon_id == recon_id, ImportedRow.app_number == app_number)
-                    .distinct()
-                )
-            )
-            .scalars()
-            .all()
-        )
-        value_lists.append(sorted(v for v in values if v is not None))
-
+    value_lists = await distinct_source_lists(db, recon_id, app_number, dimension_names)
     return [list(combo) for combo in zip(*value_lists, strict=False)]
+
+
+@router.post("/apply-all", response_model=SyncApplyAllRead)
+async def apply_all_members(
+    recon_id: uuid.UUID,
+    body: SyncApplyAllRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> SyncApplyAllRead:
+    """Old `generate_sync`: identity mappings for every zip combination."""
+    await get_accessible_recon(db, current_user, recon_id)
+    created, skipped = await apply_all_identity_mappings(
+        db,
+        recon_id,
+        app_number=body.app_number,
+        dimension_names=body.dimension_names,
+        concat_delimiter=body.concat_delimiter,
+    )
+    await record_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="sync_mapping.apply_all",
+        recon_id=recon_id,
+        entity_type="sync_mapping",
+        detail={"created": str(created), "skipped": str(skipped)},
+    )
+    await db.commit()
+    return SyncApplyAllRead(created=created, skipped=skipped)
 
 
 @router.patch("/{mapping_id}", response_model=SyncMappingRead)

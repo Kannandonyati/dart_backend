@@ -44,6 +44,28 @@ class SyncMappingRead(BaseModel):
 class SyncedRowRead(BaseModel):
     id: uuid.UUID
     app_number: int
+    app_name: str | None = None
+    app_type: str = ""
     row_number: int
     data: dict[str, str]
+    resolved: dict[str, str] = Field(default_factory=dict)
     synced: dict[str, str]
+    amount: str = "0.00"
+    sign_reversed_amount: str = "0.00"
+    flip_sign: bool = False
+
+
+class SyncApplyAllRequest(BaseModel):
+    app_number: int = Field(ge=1, le=5)
+    dimension_names: list[str] = Field(min_length=1)
+    concat_delimiter: str = Field(default="-", min_length=1, max_length=5)
+
+    @field_validator("dimension_names")
+    @classmethod
+    def _no_blank_apply_names(cls, v: list[str]) -> list[str]:
+        return SyncMappingCreate._no_blank_names(v)
+
+
+class SyncApplyAllRead(BaseModel):
+    created: int
+    skipped: int

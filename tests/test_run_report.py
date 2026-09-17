@@ -33,9 +33,9 @@ async def _owner_recon(
         email=f"{name.lower()}-a@dart.com", username=f"{name.lower()}_a", password="Password123!"
     )
     token = await _login(client, f"{name.lower()}-a@dart.com", "Password123!")
-    recon_id = (
-        await client.post(RECONS_URL, headers=_auth(token), json={"name": name})
-    ).json()["id"]
+    recon_id = (await client.post(RECONS_URL, headers=_auth(token), json={"name": name})).json()[
+        "id"
+    ]
     return token, recon_id
 
 
@@ -105,12 +105,22 @@ async def _matched_recon(
         b"YEAR,ACCOUNT,AMOUNT,PERIOD\r\n2024,ACCT_A_ALT,100.00,01\r\n2024,ACCT_C,30.00,01\r\n",
     )
     await _bridge_map(
-        client, token, recon_id, app_number=1, dimension_name="ACCOUNT",
-        source_member="ACCT_A", bridge_member="ACCT_A",
+        client,
+        token,
+        recon_id,
+        app_number=1,
+        dimension_name="ACCOUNT",
+        source_member="ACCT_A",
+        bridge_member="ACCT_A",
     )
     await _bridge_map(
-        client, token, recon_id, app_number=2, dimension_name="ACCOUNT",
-        source_member="ACCT_A_ALT", bridge_member="ACCT_A",
+        client,
+        token,
+        recon_id,
+        app_number=2,
+        dimension_name="ACCOUNT",
+        source_member="ACCT_A_ALT",
+        bridge_member="ACCT_A",
     )
     return token, recon_id
 
@@ -160,12 +170,23 @@ async def test_flip_sign_negates_matched_amount(
         client, token, recon_id, 2, b"YEAR,ACCOUNT,AMOUNT,PERIOD\r\n2024,ACCT_X_ALT,40.00,01\r\n"
     )
     await _bridge_map(
-        client, token, recon_id, app_number=1, dimension_name="ACCOUNT",
-        source_member="ACCT_X", bridge_member="ACCT_X",
+        client,
+        token,
+        recon_id,
+        app_number=1,
+        dimension_name="ACCOUNT",
+        source_member="ACCT_X",
+        bridge_member="ACCT_X",
     )
     await _bridge_map(
-        client, token, recon_id, app_number=2, dimension_name="ACCOUNT",
-        source_member="ACCT_X_ALT", bridge_member="ACCT_X", flip_sign=True,
+        client,
+        token,
+        recon_id,
+        app_number=2,
+        dimension_name="ACCOUNT",
+        source_member="ACCT_X_ALT",
+        bridge_member="ACCT_X",
+        flip_sign=True,
     )
 
     response = await client.post(f"{RECONS_URL}/{recon_id}/report/run", headers=_auth(token))
@@ -320,3 +341,67 @@ async def test_non_owner_cannot_run_or_signoff_report(
         f"{RECONS_URL}/{recon_id}/report/filters", headers=_auth(token_b)
     )
     assert filters_resp.status_code == 404
+
+
+async def test_sync_mapping_flip_sign_applies_on_report_amount(
+    client: AsyncClient, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    token, recon_id = await _owner_recon(client, make_user, name="SyncFlipReport")
+    await _add_dims_and_apps(client, token, recon_id)
+    await _import_csv(
+        client, token, recon_id, 1, b"YEAR,ACCOUNT,AMOUNT,PERIOD\r\n2024,ACCT_X,40.00,01\r\n"
+    )
+    await _import_csv(
+        client, token, recon_id, 2, b"YEAR,ACCOUNT,AMOUNT,PERIOD\r\n2024,ACCT_X,40.00,01\r\n"
+    )
+    await _bridge_map(
+        client,
+        token,
+        recon_id,
+        app_number=1,
+        dimension_name="ACCOUNT",
+        source_member="ACCT_X",
+        bridge_member="ACCT_X",
+    )
+    await _bridge_map(
+        client,
+        token,
+        recon_id,
+        app_number=2,
+        dimension_name="ACCOUNT",
+        source_member="ACCT_X",
+        bridge_member="ACCT_X",
+    )
+    created = await client.post(
+        f"{RECONS_URL}/{recon_id}/sync-mappings",
+        headers=_auth(token),
+        json={
+            "app_number": 2,
+            "dimension_names": ["ACCOUNT"],
+            "source_sync": "ACCT_X",
+            "target_sync": "ACCT_X",
+            "flip_sign": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    row = (await client.post(f"{RECONS_URL}/{recon_id}/report/run", headers=_auth(token))).json()[
+        "rows"
+    ][0]
+    assert row["app2_amount"] == "-40.00"
+    assert row["variance"] == "80.00"
+
+
+async def test_baseline_app_swaps_variance_sign(
+    client: AsyncClient, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    token, recon_id = await _matched_recon(client, make_user)
+    body = (
+        await client.post(
+            f"{RECONS_URL}/{recon_id}/report/run?baseline_app=2&comparison_app=1",
+            headers=_auth(token),
+        )
+    ).json()
+    assert body["summary"]["baseline_app"] == 2
+    rows = {row["match_key"]["ACCOUNT"]: row for row in body["rows"]}
+    # ACCT_B exists only on app 1 (50) so baseline app 2 vs app 1 → -50
+    assert rows["ACCT_B"]["variance"] == "-50.00"

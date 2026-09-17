@@ -4,6 +4,7 @@ don't share a filesystem — see Settings.upload_storage_dir) touches
 one module, not every call site.
 """
 
+import asyncio
 import uuid
 from pathlib import Path
 
@@ -33,3 +34,15 @@ def read_upload(path: str) -> bytes:
 
 def delete_upload(path: str) -> None:
     Path(path).unlink(missing_ok=True)
+
+
+async def save_upload_async(content: bytes, *, suffix: str = ".csv") -> str:
+    return await asyncio.to_thread(save_upload, content, suffix=suffix)
+
+
+async def read_upload_async(path: str) -> bytes:
+    return await asyncio.to_thread(read_upload, path)
+
+
+async def delete_upload_async(path: str) -> None:
+    await asyncio.to_thread(delete_upload, path)

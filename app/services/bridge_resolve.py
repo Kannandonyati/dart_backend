@@ -33,7 +33,7 @@ from app.models.bridge import KICKOUT_SENTINEL, BridgeMapping
 from app.models.dimension import Dimension, ReconApp
 from app.models.import_run import ImportedRow, ImportRun, ImportStatus
 from app.models.report import ReportSignoff
-from app.services.file_storage import read_upload
+from app.services.file_storage import read_upload_async
 
 BRIDGED_DIMENSION_EXCLUDE = frozenset({"AMOUNT"})
 
@@ -176,7 +176,7 @@ async def load_dimension_aliases(
         if app is None or not app.has_header:
             continue
         try:
-            raw = read_upload(run.file_path)
+            raw = await read_upload_async(run.file_path)
         except OSError:
             continue
         first_line = raw.decode("utf-8-sig").splitlines()[:1]

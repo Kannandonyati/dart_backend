@@ -26,7 +26,7 @@ from sqlalchemy.orm import selectinload
 from app.db.session import celery_session_scope
 from app.models.dimension import Dimension, ReconApp
 from app.models.import_run import ImportedRow, ImportRun, ImportStatus
-from app.services.file_storage import delete_upload, read_upload
+from app.services.file_storage import delete_upload_async, read_upload_async
 from app.services.import_validation import (
     DimensionForValidation,
     ImportValidationError,
@@ -79,7 +79,7 @@ async def _run_import(import_run_id: uuid.UUID) -> None:
                 if m.app_number == run.app_number
             ]
 
-            raw = read_upload(run.file_path)
+            raw = await read_upload_async(run.file_path)
             parsed_rows = validate_and_parse(
                 raw,
                 delimiter=app_settings.delimiter,
@@ -129,7 +129,7 @@ async def _run_import(import_run_id: uuid.UUID) -> None:
             run.error_message = "An unexpected error occurred while processing this file."
             run.completed_at = datetime.now(UTC)
         finally:
-            delete_upload(run.file_path)
+            await delete_upload_async(run.file_path)
 
 
 @celery_app.task(name="run_import_task")  # type: ignore[untyped-decorator]

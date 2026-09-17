@@ -54,14 +54,33 @@ _LEVEL_STYLES.update(
 )
 
 _REDACTED = "***REDACTED***"
-_SENSITIVE_KEYS = {"password", "token", "authorization", "secret", "access_token", "refresh_token"}
+_SENSITIVE_KEYS = {
+    "password",
+    "token",
+    "authorization",
+    "secret",
+    "access_token",
+    "refresh_token",
+    "invite_token",
+    "reset_token",
+    "client_secret",
+    "email",
+}
+_SENSITIVE_SUBSTR = ("password", "token", "secret", "authorization")
+
+
+def _is_sensitive_key(key: str) -> bool:
+    lowered = key.lower()
+    if lowered in _SENSITIVE_KEYS:
+        return True
+    return any(part in lowered for part in _SENSITIVE_SUBSTR)
 
 
 def _redact_sensitive(
     _logger: object, _method_name: str, event_dict: MutableMapping[str, Any]
 ) -> Mapping[str, Any]:
     for key in list(event_dict):
-        if key.lower() in _SENSITIVE_KEYS:
+        if _is_sensitive_key(key):
             event_dict[key] = _REDACTED
     return event_dict
 

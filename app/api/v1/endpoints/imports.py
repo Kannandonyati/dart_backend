@@ -34,7 +34,7 @@ from app.core.recon_access import get_accessible_recon
 from app.models.dimension import ReconApp
 from app.models.import_run import ImportedRow, ImportRun
 from app.schemas.import_run import ImportedRowRead, ImportRunRead
-from app.services.file_storage import save_upload
+from app.services.file_storage import save_upload_async
 from app.tasks.import_tasks import run_import_task
 
 router = APIRouter(prefix="/recons/{recon_id}/imports", tags=["run-import"])
@@ -105,7 +105,7 @@ async def upload_import_file(
         raise AppError("A file name is required.", code="missing_filename")
 
     content = await file.read()
-    stored_path = save_upload(content)
+    stored_path = await save_upload_async(content)
 
     run = ImportRun(
         recon_id=recon_id,
