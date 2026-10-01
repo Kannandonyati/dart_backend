@@ -259,6 +259,7 @@ recon).
 
 ### Explicitly deferred (no current frontend consumer)
 `global_variable`, `ask_dart`, `external_source`, `pivot_table`,
-`scheduler` (Airflow — `architecture.md` says keep Airflow; becomes real
-work once Phase 5+ has background jobs to schedule), `ai_proxy`
+`ai_proxy`
 (superseded by `app/ai/` once AI Auto Draft is integrated directly).
+Scheduler is no longer deferred: workflows live in this service
+(`app/models/workflow.py`, Celery Beat), not a second Airflow repo.

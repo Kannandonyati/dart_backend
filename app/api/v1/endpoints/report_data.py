@@ -21,6 +21,7 @@ from app.api.deps import CurrentUser, DbSession
 from app.core.audit import record_audit_log
 from app.core.exceptions import NotFoundError
 from app.core.recon_access import get_accessible_recon
+from app.models.dimension import ReconApp
 from app.models.import_run import ImportRun
 from app.models.report import ReportSignoff
 from app.schemas.report import (
@@ -158,8 +159,19 @@ async def last_refresh(
     recon_id: uuid.UUID, current_user: CurrentUser, db: DbSession
 ) -> list[LastRefreshRead]:
     await get_accessible_recon(db, current_user, recon_id)
+    app_numbers = (
+        (
+            await db.execute(
+                select(ReconApp.app_number)
+                .where(ReconApp.recon_id == recon_id)
+                .order_by(ReconApp.app_number)
+            )
+        )
+        .scalars()
+        .all()
+    )
     results = []
-    for app_number in (1, 2):
+    for app_number in app_numbers:
         stmt = (
             select(ImportRun.completed_at)
             .where(ImportRun.recon_id == recon_id, ImportRun.app_number == app_number)

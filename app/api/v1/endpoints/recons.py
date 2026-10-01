@@ -32,7 +32,8 @@ from app.core.recon_bootstrap import seed_new_recon
 from app.core.scope_access import accessible_group_ids
 from app.models.recon import Recon
 from app.models.security import Group
-from app.schemas.recon import ReconCreate, ReconRead, ReconUpdate
+from app.schemas.recon import ReconCopy, ReconCreate, ReconRead, ReconUpdate
+from app.services.recon_copy import copy_recon
 
 router = APIRouter(prefix="/recons", tags=["recons"])
 
@@ -222,6 +223,8 @@ async def update_recon(
         recon.name = body.name
     if body.description is not None:
         recon.description = body.description
+    if body.archived is not None:
+        recon.archived = body.archived
 
     try:
         await db.flush()
@@ -257,6 +260,39 @@ async def delete_recon(recon_id: uuid.UUID, current_user: CurrentUser, db: DbSes
         entity_id=str(recon.id),
     )
     await db.commit()
+
+
+@router.post("/{recon_id}/copy", response_model=ReconRead, status_code=201)
+async def copy_existing_recon(
+    recon_id: uuid.UUID, body: ReconCopy, current_user: CurrentUser, db: DbSession
+) -> ReconRead:
+    source = await _get_owned_or_manageable(db, current_user, recon_id)
+    if await _live_name_taken(db, body.name):
+        raise ConflictError("A recon with this name already exists.")
+    group = (await db.execute(select(Group).where(Group.id == body.group_id))).scalar_one_or_none()
+    if group is None:
+        raise NotFoundError("Group not found")
+    if not current_user.is_superuser:
+        allowed = await accessible_group_ids(db, current_user.id)
+        if group.id not in allowed:
+            raise NotFoundError("Group not found")
+    clone = await copy_recon(db, source=source, name=body.name, owner=current_user, group=group)
+    await record_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="recon.copied",
+        recon_id=clone.id,
+        entity_type="recon",
+        entity_id=str(clone.id),
+        detail={"source_id": str(source.id), "name": clone.name},
+    )
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise ConflictError("A recon with this name already exists.") from exc
+    recon = await _reload(db, clone.id)
+    return _to_read(recon)
 
 
 @router.post("/{recon_id}/groups/{group_id}", response_model=ReconRead)

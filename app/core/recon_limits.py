@@ -6,4 +6,5 @@ The same cap lives here so Add Application matches that UI.
 """
 
 MAX_RECON_APPS = 5
+MIN_RECON_APPS = 2
 BOOTSTRAP_APP_NUMBERS = (1, 2)

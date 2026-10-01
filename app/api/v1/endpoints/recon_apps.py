@@ -22,12 +22,14 @@ from app.core.exceptions import ConflictError, NotFoundError
 from app.core.recon_access import get_accessible_recon
 from app.core.recon_limits import MAX_RECON_APPS
 from app.models.dimension import Dimension, DimensionMapping, ReconApp
+from app.models.global_variable import GlobalVariable
 from app.schemas.dimension import ReconAppCreate, ReconAppRead, ReconAppUpdate
+from app.services.recon_app_delete import delete_recon_app
 
 router = APIRouter(prefix="/recons/{recon_id}/apps", tags=["dimension-linking"])
 
 
-def _to_read(app: ReconApp) -> ReconAppRead:
+def _to_read(app: ReconApp, gv_name: str | None = None) -> ReconAppRead:
     return ReconAppRead(
         id=app.id,
         recon_id=app.recon_id,
@@ -39,9 +41,19 @@ def _to_read(app: ReconApp) -> ReconAppRead:
         currency_symbol=app.currency_symbol,
         thousands_separator=app.thousands_separator,
         has_header=app.has_header,
+        global_variable_id=app.global_variable_id,
+        global_variable_name=gv_name,
         created_at=app.created_at,
         updated_at=app.updated_at,
     )
+
+
+async def _gv_names(db: DbSession, apps: list[ReconApp]) -> dict[uuid.UUID, str]:
+    ids = {app.global_variable_id for app in apps if app.global_variable_id}
+    if not ids:
+        return {}
+    rows = (await db.execute(select(GlobalVariable).where(GlobalVariable.id.in_(ids)))).scalars()
+    return {row.id: row.name for row in rows}
 
 
 async def _get_app(db: DbSession, recon_id: uuid.UUID, app_number: int) -> ReconApp:
@@ -117,7 +129,12 @@ async def list_recon_apps(
     await get_accessible_recon(db, current_user, recon_id)
     stmt = select(ReconApp).where(ReconApp.recon_id == recon_id).order_by(ReconApp.app_number)
     result = await db.execute(stmt)
-    return [_to_read(app) for app in result.scalars().all()]
+    apps = list(result.scalars().all())
+    names = await _gv_names(db, apps)
+    return [
+        _to_read(app, names.get(app.global_variable_id) if app.global_variable_id else None)
+        for app in apps
+    ]
 
 
 @router.patch("/{app_number}", response_model=ReconAppRead)
@@ -130,10 +147,29 @@ async def update_recon_app(
 ) -> ReconAppRead:
     await get_accessible_recon(db, current_user, recon_id)
     app = await _get_app(db, recon_id, app_number)
-
-    for field, value in body.model_dump(exclude_unset=True).items():
+    payload = body.model_dump(exclude_unset=True)
+    gv_id = payload.pop("global_variable_id", "__omit__")
+    for field, value in payload.items():
         setattr(app, field, value)
+    if gv_id != "__omit__":
+        if gv_id is not None:
+            gv = (
+                await db.execute(select(GlobalVariable).where(GlobalVariable.id == gv_id))
+            ).scalar_one_or_none()
+            if gv is None:
+                raise NotFoundError("Global variable not found")
+        app.global_variable_id = gv_id
 
     await db.commit()
     await db.refresh(app)
-    return _to_read(app)
+    names = await _gv_names(db, [app])
+    return _to_read(app, names.get(app.global_variable_id) if app.global_variable_id else None)
+
+
+@router.delete("/{app_number}", status_code=204)
+async def remove_recon_app(
+    recon_id: uuid.UUID, app_number: int, current_user: CurrentUser, db: DbSession
+) -> None:
+    await get_accessible_recon(db, current_user, recon_id)
+    await delete_recon_app(db, recon_id, app_number)
+    await db.commit()

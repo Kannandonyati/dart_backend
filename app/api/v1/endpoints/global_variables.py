@@ -19,7 +19,7 @@ _MANAGE = require_privilege("security:manage")
 async def list_global_variables(db: DbSession) -> list[GlobalVariableRead]:
     stmt = select(GlobalVariable).order_by(GlobalVariable.name)
     rows = (await db.execute(stmt)).scalars().all()
-    return [GlobalVariableRead(name=row.name) for row in rows]
+    return [GlobalVariableRead(id=row.id, name=row.name) for row in rows]
 
 
 @router.post("", response_model=GlobalVariableRead, status_code=201, dependencies=[_MANAGE])
@@ -42,4 +42,4 @@ async def create_global_variable(
     except IntegrityError as exc:
         await db.rollback()
         raise ConflictError("A global variable with this name already exists.") from exc
-    return GlobalVariableRead(name=row.name)
+    return GlobalVariableRead(id=row.id, name=row.name)

@@ -40,8 +40,12 @@ logger = structlog.get_logger(__name__)
 async def _run_import(import_run_id: uuid.UUID) -> None:
     async with celery_session_scope() as db:
         run = (
-            await db.execute(select(ImportRun).where(ImportRun.id == import_run_id))
+            await db.execute(
+                select(ImportRun).where(ImportRun.id == import_run_id).with_for_update()
+            )
         ).scalar_one()
+        if run.status in {ImportStatus.COMPLETED, ImportStatus.FAILED}:
+            return
         run.status = ImportStatus.PROCESSING
         run.started_at = datetime.now(UTC)
         await db.flush()

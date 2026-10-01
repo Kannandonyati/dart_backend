@@ -158,6 +158,7 @@ _COMPONENTS: tuple[UiComponent, ...] = (
         label="Workflow Scheduler",
         kind=ComponentKind.SIDEBAR_ITEM,
         parent="sidebar.workflow-automation",
+        api_prefixes=("/workflows", "/workflow-runs"),
     ),
     UiComponent(
         key="sidebar.workflow-automation.scheduler.builder",

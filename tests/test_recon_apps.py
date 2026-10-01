@@ -158,3 +158,50 @@ async def test_update_nonexistent_recon_app_is_404(
         f"{RECONS_URL}/{recon_id}/apps/3", headers=_auth(token), json={"delimiter": ";"}
     )
     assert response.status_code == 404
+
+
+async def test_delete_third_app_and_keep_two(
+    client: AsyncClient, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    token, recon_id = await _owner_token_and_recon(client, make_user)
+    created = await client.post(
+        f"{RECONS_URL}/{recon_id}/apps",
+        headers=_auth(token),
+        json={"app_number": 3, "name": "Extra"},
+    )
+    assert created.status_code == 201
+    removed = await client.delete(f"{RECONS_URL}/{recon_id}/apps/3", headers=_auth(token))
+    assert removed.status_code == 204
+    listed = await client.get(f"{RECONS_URL}/{recon_id}/apps", headers=_auth(token))
+    assert [row["app_number"] for row in listed.json()] == [1, 2]
+    blocked = await client.delete(f"{RECONS_URL}/{recon_id}/apps/1", headers=_auth(token))
+    assert blocked.status_code == 409
+
+
+async def test_attach_and_detach_global_variable_on_app(
+    client: AsyncClient, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    await make_user(
+        email="admin@dart.com", username="admin", password="Password123!", is_superuser=True
+    )
+    token = await _login(client, "admin@dart.com", "Password123!")
+    recon_id = (await client.post(RECONS_URL, headers=_auth(token), json={"name": "GV Recon"})).json()[
+        "id"
+    ]
+    gv = await client.post("/api/v1/global-variables", headers=_auth(token), json={"name": "FX_RATE"})
+    assert gv.status_code == 201
+    attached = await client.patch(
+        f"{RECONS_URL}/{recon_id}/apps/1",
+        headers=_auth(token),
+        json={"global_variable_id": gv.json()["id"]},
+    )
+    assert attached.status_code == 200
+    assert attached.json()["global_variable_name"] == "FX_RATE"
+    detached = await client.patch(
+        f"{RECONS_URL}/{recon_id}/apps/1",
+        headers=_auth(token),
+        json={"global_variable_id": None},
+    )
+    assert detached.json()["global_variable_id"] is None
+    assert detached.json()["global_variable_name"] is None
+

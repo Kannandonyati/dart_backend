@@ -306,3 +306,58 @@ async def test_response_never_leaks_recon_id_of_nonexistent_recon_differently(
     fake_error = fake_response.json()["error"]
     assert real_error["code"] == fake_error["code"] == "not_found"
     assert real_error["message"] == fake_error["message"]
+
+
+async def test_owner_can_archive_and_unarchive_recon(
+    client: AsyncClient, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    await make_user(email="a@dart.com", username="a", password="Password123!")
+    token = await _login(client, "a@dart.com", "Password123!")
+    recon_id = (await client.post(RECONS_URL, headers=_auth(token), json={"name": "Live"})).json()[
+        "id"
+    ]
+    archived = await client.patch(
+        f"{RECONS_URL}/{recon_id}", headers=_auth(token), json={"archived": True}
+    )
+    assert archived.status_code == 200
+    assert archived.json()["archived"] is True
+    restored = await client.patch(
+        f"{RECONS_URL}/{recon_id}", headers=_auth(token), json={"archived": False}
+    )
+    assert restored.json()["archived"] is False
+
+
+async def test_copy_recon_clones_apps_and_links_group(
+    client: AsyncClient, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    await make_user(
+        email="admin@dart.com", username="admin", password="Password123!", is_superuser=True
+    )
+    token = await _login(client, "admin@dart.com", "Password123!")
+    recon_id = (await client.post(RECONS_URL, headers=_auth(token), json={"name": "Source"})).json()[
+        "id"
+    ]
+    await client.patch(
+        f"{RECONS_URL}/{recon_id}/apps/1", headers=_auth(token), json={"name": "GL"}
+    )
+    group_id = (
+        await client.post("/api/v1/groups", headers=_auth(token), json={"name": "Copy Group"})
+    ).json()["id"]
+    copied = await client.post(
+        f"{RECONS_URL}/{recon_id}/copy",
+        headers=_auth(token),
+        json={"name": "CopyOf_Source", "group_id": group_id},
+    )
+    assert copied.status_code == 201, copied.text
+    assert copied.json()["name"] == "CopyOf_Source"
+    assert copied.json()["id"] != recon_id
+    assert copied.json()["group_name"] == "Copy Group"
+    apps = await client.get(f"{RECONS_URL}/{copied.json()['id']}/apps", headers=_auth(token))
+    assert {row["name"] for row in apps.json()} == {"GL", "App 2"}
+    again = await client.post(
+        f"{RECONS_URL}/{recon_id}/copy",
+        headers=_auth(token),
+        json={"name": "CopyOf_Source", "group_id": group_id},
+    )
+    assert again.status_code == 409
+

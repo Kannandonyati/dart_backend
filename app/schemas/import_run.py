@@ -19,6 +19,7 @@ class ImportRunRead(BaseModel):
     status: ImportStatus
     row_count: int | None
     error_message: str | None
+    je_flag: bool = False
     created_by: str
     created_at: datetime
     started_at: datetime | None

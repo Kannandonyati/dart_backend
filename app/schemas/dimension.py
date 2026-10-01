@@ -33,6 +33,7 @@ class ReconAppUpdate(BaseModel):
     currency_symbol: str | None = None
     thousands_separator: str | None = Field(default=None, min_length=1, max_length=5)
     has_header: bool | None = None
+    global_variable_id: uuid.UUID | None = None
 
 
 class ReconAppRead(BaseModel):
@@ -46,6 +47,8 @@ class ReconAppRead(BaseModel):
     currency_symbol: str | None
     thousands_separator: str
     has_header: bool
+    global_variable_id: uuid.UUID | None = None
+    global_variable_name: str | None = None
     created_at: datetime
     updated_at: datetime
 

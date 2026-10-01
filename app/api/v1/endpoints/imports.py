@@ -35,7 +35,7 @@ from app.models.dimension import ReconApp
 from app.models.import_run import ImportedRow, ImportRun
 from app.schemas.import_run import ImportedRowRead, ImportRunRead
 from app.services.file_storage import save_upload_async
-from app.tasks.import_tasks import run_import_task
+from app.services.import_dispatch import dispatch_import
 
 router = APIRouter(prefix="/recons/{recon_id}/imports", tags=["run-import"])
 
@@ -51,6 +51,7 @@ def _to_read(run: ImportRun) -> ImportRunRead:
         status=run.status,
         row_count=run.row_count,
         error_message=run.error_message,
+        je_flag=run.je_flag,
         created_by=run.created_by.username,
         created_at=run.created_at,
         started_at=run.started_at,
@@ -88,6 +89,7 @@ async def upload_import_file(
     db: DbSession,
     app_number: Annotated[int, Form()],
     file: UploadFile,
+    je_flag: Annotated[bool, Form()] = False,
 ) -> ImportRunRead:
     await get_accessible_recon(db, current_user, recon_id)
 
@@ -113,6 +115,7 @@ async def upload_import_file(
         file_name=file.filename,
         file_path=stored_path,
         created_by_id=current_user.id,
+        je_flag=je_flag,
     )
     db.add(run)
     await db.flush()
@@ -123,17 +126,19 @@ async def upload_import_file(
         recon_id=recon_id,
         entity_type="import_run",
         entity_id=str(run.id),
-        detail={"file_name": file.filename, "app_number": str(app_number)},
+        detail={"file_name": file.filename, "app_number": str(app_number), "je_flag": str(je_flag)},
     )
     await db.commit()
-
-    run_import_task.delay(str(run.id))
-
-    stmt = (
-        select(ImportRun).options(selectinload(ImportRun.created_by)).where(ImportRun.id == run.id)
-    )
-    run = (await db.execute(stmt)).scalar_one()
-    return _to_read(run)
+    await dispatch_import(run.id)
+    loaded = (
+        await db.execute(
+            select(ImportRun)
+            .options(selectinload(ImportRun.created_by))
+            .where(ImportRun.id == run.id)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    return _to_read(loaded)
 
 
 @router.get("", response_model=list[ImportRunRead])

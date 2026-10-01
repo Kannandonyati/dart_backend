@@ -62,6 +62,9 @@ class ReconApp(Base):
     currency_symbol: Mapped[str | None] = mapped_column(String(5), nullable=True)
     thousands_separator: Mapped[str] = mapped_column(String(5), nullable=False, default=",")
     has_header: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    global_variable_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("global_variables.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

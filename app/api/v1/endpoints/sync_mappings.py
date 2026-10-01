@@ -4,16 +4,19 @@ Route order: `/possible-combinations` and `/apply-all` are registered
 before `/{mapping_id}` so those literals are not captured as UUIDs.
 """
 
+import csv
+import io
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DbSession
 from app.core.audit import record_audit_log
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import AppError, ConflictError, NotFoundError
 from app.core.recon_access import get_accessible_recon
 from app.models.sync import SyncMapping
 from app.schemas.sync import (
@@ -97,6 +100,88 @@ async def list_sync_mappings(
         stmt = stmt.where(SyncMapping.app_number == app_number)
     stmt = stmt.order_by(SyncMapping.dimension_names, SyncMapping.source_sync)
     return [_to_read(m) for m in (await db.execute(stmt)).scalars().all()]
+
+
+_CSV_FIELDS = (
+    "app_number",
+    "dimension_names",
+    "concat_delimiter",
+    "source_sync",
+    "target_sync",
+    "flip_sign",
+)
+
+
+@router.get("/export")
+async def export_sync_mappings(
+    recon_id: uuid.UUID, current_user: CurrentUser, db: DbSession, app_number: int | None = None
+) -> StreamingResponse:
+    await get_accessible_recon(db, current_user, recon_id)
+    stmt = select(SyncMapping).where(SyncMapping.recon_id == recon_id)
+    if app_number is not None:
+        stmt = stmt.where(SyncMapping.app_number == app_number)
+    stmt = stmt.order_by(SyncMapping.app_number, SyncMapping.source_sync)
+    rows = (await db.execute(stmt)).scalars()
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(_CSV_FIELDS)
+    for mapping in rows:
+        writer.writerow(
+            [
+                mapping.app_number,
+                "|".join(mapping.dimension_names),
+                mapping.concat_delimiter,
+                mapping.source_sync,
+                mapping.target_sync,
+                "TRUE" if mapping.flip_sign else "FALSE",
+            ]
+        )
+    buffer.seek(0)
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="sync_mappings.csv"'},
+    )
+
+
+@router.post("/import", response_model=list[SyncMappingRead])
+async def import_sync_mappings(
+    recon_id: uuid.UUID, current_user: CurrentUser, db: DbSession, file: UploadFile
+) -> list[SyncMappingRead]:
+    await get_accessible_recon(db, current_user, recon_id)
+    raw = (await file.read()).decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(raw))
+    if not reader.fieldnames or "source_sync" not in {name.strip() for name in reader.fieldnames}:
+        raise AppError("The import file is missing required columns.", code="invalid_import_row")
+    created: list[SyncMapping] = []
+    for line_no, row in enumerate(reader, start=2):
+        if not row or all(not (cell or "").strip() for cell in row.values()):
+            continue
+        try:
+            names = [
+                part.strip()
+                for part in row["dimension_names"].split("|")
+                if part.strip()
+            ]
+            mapping = SyncMapping(
+                recon_id=recon_id,
+                app_number=int(row["app_number"]),
+                dimension_names=names,
+                concat_delimiter=(row.get("concat_delimiter") or "-").strip() or "-",
+                source_sync=row["source_sync"].strip(),
+                target_sync=row["target_sync"].strip(),
+                flip_sign=row.get("flip_sign", "FALSE").strip().upper() in {"TRUE", "1", "YES"},
+            )
+        except (KeyError, ValueError) as exc:
+            raise AppError(f"Row {line_no}: {exc}", code="invalid_import_row") from exc
+        db.add(mapping)
+        created.append(mapping)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise ConflictError("The import file contains a mapping that already exists.") from exc
+    return [_to_read(mapping) for mapping in created]
 
 
 @router.get("/possible-combinations", response_model=list[list[str]])

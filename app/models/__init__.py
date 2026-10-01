@@ -8,8 +8,6 @@ from app.models.audit import AuditLog
 from app.models.audit_mode import AuditMode
 from app.models.bridge import BridgeMapping, BridgeRun, BridgeRunStatus
 from app.models.global_variable import GlobalVariable, group_global_variables
-from app.models.sso import SsoAuditLog, SsoProvider
-from app.models.system_log import SystemLog
 from app.models.dimension import Dimension, DimensionMapping, ReconApp
 from app.models.import_run import ImportedRow, ImportRun, ImportStatus
 from app.models.recon import Recon, recon_group_xref
@@ -26,9 +24,19 @@ from app.models.security import (
     group_roles,
     group_teams,
 )
+from app.models.sso import SsoAuditLog, SsoProvider
 from app.models.sync import SyncMapping
+from app.models.system_log import SystemLog
 from app.models.ui_component import UiComponentSetting
 from app.models.user import User
+from app.models.workflow import (
+    Workflow,
+    WorkflowRun,
+    WorkflowRunStatus,
+    WorkflowRunStep,
+    WorkflowRunStepStatus,
+    WorkflowTriggerKind,
+)
 
 __all__ = [
     "AuditLog",
@@ -59,6 +67,12 @@ __all__ = [
     "Team",
     "UiComponentSetting",
     "User",
+    "Workflow",
+    "WorkflowRun",
+    "WorkflowRunStatus",
+    "WorkflowRunStep",
+    "WorkflowRunStepStatus",
+    "WorkflowTriggerKind",
     "group_global_variables",
     "group_lobs",
     "group_roles",

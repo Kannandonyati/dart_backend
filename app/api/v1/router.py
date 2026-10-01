@@ -31,6 +31,7 @@ from app.api.v1.endpoints import (
     ui_components,
     user_maintenance,
     users,
+    workflows,
 )
 from app.api.v1.endpoints.ui_components import COMPONENT_GUARD
 
@@ -75,3 +76,5 @@ api_router.include_router(report_data.router, dependencies=_GUARDED)
 api_router.include_router(audit_logs.router, dependencies=_GUARDED)
 api_router.include_router(audit_logs.recon_router, dependencies=_GUARDED)
 api_router.include_router(system_logs.router, dependencies=_GUARDED)
+api_router.include_router(workflows.router, dependencies=_GUARDED)
+api_router.include_router(workflows.runs_router, dependencies=_GUARDED)

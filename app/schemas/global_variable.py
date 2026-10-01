@@ -1,3 +1,5 @@
+import uuid
+
 from pydantic import BaseModel, Field
 
 
@@ -6,4 +8,5 @@ class GlobalVariableCreate(BaseModel):
 
 
 class GlobalVariableRead(BaseModel):
+    id: uuid.UUID | None = None
     name: str

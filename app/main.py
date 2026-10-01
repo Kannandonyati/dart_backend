@@ -49,6 +49,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     await run_startup_checks()
 
     listener_task = asyncio.create_task(manager.start_listener())
+    clock_task = None
+    if settings.environment == "local":
+        from app.services.workflow_dispatch import run_workflow_clock
+
+        clock_task = asyncio.create_task(run_workflow_clock())
+        logger.info(colorize("workflow_clock_started", GREEN))
+
     logger.info(colorize("websocket_manager_initialized", GREEN))
 
     logger.info(colorize("dart_backend_ready", GREEN), environment=settings.environment)
@@ -57,7 +64,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     finally:
         logger.info(colorize("shutdown_started", CYAN))
         listener_task.cancel()
-        await asyncio.gather(listener_task, return_exceptions=True)
+        if clock_task is not None:
+            clock_task.cancel()
+            await asyncio.gather(listener_task, clock_task, return_exceptions=True)
+        else:
+            await asyncio.gather(listener_task, return_exceptions=True)
         await engine.dispose()
         logger.info(colorize("shutdown_complete", CYAN))
 

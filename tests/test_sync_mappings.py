@@ -294,3 +294,45 @@ async def test_run_transformation_applies_flip_sign(
     mapped_row = next(r for r in rows if r["data"]["ACCOUNT"] == "1000")
     assert mapped_row["flip_sign"] is True
     assert mapped_row["sign_reversed_amount"] == "-100.00"
+
+
+async def test_export_and_import_sync_mappings(
+    client: AsyncClient, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    token, recon_id = await _owner_recon(client, make_user)
+    created = await client.post(
+        f"{RECONS_URL}/{recon_id}/sync-mappings",
+        headers=_auth(token),
+        json={
+            "app_number": 1,
+            "dimension_names": ["ACCOUNT"],
+            "source_sync": "1000",
+            "target_sync": "CASH",
+            "flip_sign": True,
+        },
+    )
+    assert created.status_code == 201
+    exported = await client.get(
+        f"{RECONS_URL}/{recon_id}/sync-mappings/export", headers=_auth(token)
+    )
+    assert exported.status_code == 200
+    assert b"CASH" in exported.content
+    other = (await client.post(RECONS_URL, headers=_auth(token), json={"name": "R2"})).json()["id"]
+    imported = await client.post(
+        f"{RECONS_URL}/{other}/sync-mappings/import",
+        headers=_auth(token),
+        files={"file": ("sync.csv", exported.content, "text/csv")},
+    )
+    assert imported.status_code == 200, imported.text
+    assert imported.json()[0]["target_sync"] == "CASH"
+
+
+async def test_export_transformed_data(
+    client: AsyncClient, make_user: Callable[..., Awaitable[User]]
+) -> None:
+    token, recon_id = await _recon_with_two_apps_dimensions_and_data(client, make_user)
+    exported = await client.get(f"{RECONS_URL}/{recon_id}/sync-data/export", headers=_auth(token))
+    assert exported.status_code == 200
+    assert exported.headers["content-type"].startswith("text/csv")
+    assert b"app_number" in exported.content
+

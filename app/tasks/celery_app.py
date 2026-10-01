@@ -27,7 +27,7 @@ celery_app = Celery(
     "dart",
     broker=resolve_loopback_url(str(settings.celery_broker_url)),
     backend=resolve_loopback_url(str(settings.celery_result_backend)),
-    include=["app.tasks.import_tasks", "app.tasks.bridge_tasks"],
+    include=["app.tasks.import_tasks", "app.tasks.bridge_tasks", "app.tasks.workflow_tasks"],
 )
 
 celery_app.conf.update(
@@ -49,6 +49,12 @@ celery_app.conf.update(
     # past a 120s timeout before this was set.
     broker_connection_timeout=2,
     broker_connection_max_retries=1,
+    beat_schedule={
+        "tick-due-workflows": {
+            "task": "tick_due_workflows",
+            "schedule": 60.0,
+        }
+    },
 )
 
 
